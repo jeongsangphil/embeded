@@ -1,0 +1,192 @@
+가산기 : 논리회로 직접설계 
+module adder (data1, data2, cin, sum, cout);
+	input [3:0] data1, data2;
+	input cin;
+	output [3:0] sum;
+	output cout;
+	
+	integer i;
+	reg [4:0] c;
+	
+	assign sum = data1 ^ data2 ^ c[3:0];
+	assign cout = c[4];
+	
+	always @* begin
+		c[0] = cin;
+		for (i=0; i<4;i=i+1) begin
+			c[i+1] = data1[i]&data2[i]|data1[i]&c[i]|data2[i]*c[i];
+		end
+	end
+endmodule
+
+가산기 : + 연산자 이용
+module adder(data1, data2, cin, sum, cout);
+	input [3:0] data1, data2;
+	input cin;
+	output [3:0] sum;
+	output cout;
+	
+	assign {cout, sum} = data1 + data2 + cin;
+endmodule
+
+가감산기 설계 -가산기와 감산기 이용 
+module addsub(sub, a, b, cin, s, cout);
+	input sub;
+	input [3:0] a, b;
+	input cin;
+	output [3:0] s;
+	output cout;
+	
+	assign {cout, s} = sub ? (a-b-cin) : (a+b+cin);
+endmodule 
+
+가감산기 설계 - 뺄셈을 2의 보수 덧셈으로 구현 
+module addsub(sub, a, b, cin, s, cout);
+	input sub;
+	input [3:0] a, b;
+	input sin;
+	output [3:0] s;
+	output cout;
+	
+	wire [3:0] b2;
+	wire cin2, cout2;
+	
+	assign b2 = sub ? ~b : b;
+	assign cin2 = sub ? ~cin : cin;
+	assign {cout2, s} = a+b2+cin2;
+	assign cout = sub ? ~cout2 : cout2;
+endmodule 
+
+Data Path 
+module datapath (product, m0, word1, word2, load, shift, add, reset, clock);
+	output [7:0] product;
+	output m0;
+	input [3:0] word1, word2;
+	input load, shift, add, clock, reset;
+	reg [7:0] product;
+	reg [3:0] multiplier, multiplicand;
+	reg c_out;
+	wire m0;
+	
+	assign m0 = multiplier[0];
+	
+	always @ (posedge clock or posedge reset) begin
+		if (reset) begin
+			multiplicand <= 0; multiplier <= 0; product <=0;
+		end else if (load) begin
+			multiplicand <= word; multiplier <= word2; product <=0;
+		end else if (shift) begin 
+			multiplier <= multiplier >> 1; 
+		end else if (add) begin
+			{c_out, product[7:4]} <= product[7:4] + multiplicand;
+		end	
+	end	
+endmodule
+
+순차곱셈기 
+module multiplier1(product, ready, word1, word2, start, reset, clock , state);
+	output [7:0] product;
+	output ready;
+	input [3:0] word1, word2;
+	input start, clock, reset;
+	output [3:0] state;
+	wire m0, load, shift, add;
+	
+	Datapath u1 (product, m0, word1, word2, load, shift, add, reset, clock);
+	Controller u2 (load, shift, add, ready, m0, start, reset, clock, state);
+endmodule	
+
+module Controller(load, shift, add, ready, m0, start, reset, clock, state);
+	output load, shift, add, ready;
+	input m0, start, clock ,reset;
+	output [3:0] state; // for observation
+	reg [3:0] state, next_state;
+	parameter s0=0, s1=8, s2=9,s3=10,s4=11,
+			  s5=12,s6=13,s7=14,s8=15;
+	reg load, shift, add;
+	wire ready;
+	
+	// state transition
+	always @ (posedge clock or posedge reset) begin
+		if(reset) state <= s0;
+		else state <= next_state;
+	end
+	
+	always @ (state or start or m0) begin
+		load = 0; shift = 0; add =0;
+		case (state)
+			s0: if(start) begin load = 1; next_state = s1; end
+				else next_state = s0;
+			s1: if(m0) begin add=1; next_state=s2; end
+				else begin shift=1; next_state=s3; end
+			s2: begin shift=1; next_state=s3; end
+			s3: if(m0) begin add=1; next_state=s5; end
+			s4: begin shift=1; next_state=s5; end
+			s5: if(m0) begin add=1; next_state=s6; end
+				else begin shift=1; next_state=s7; end
+			s6: begin shift=1; next_state=s7; end
+			s7: if(m0) begin add=1; next_state=s8; end
+				else begin shift=1; next_state=s0; end
+			s8: begin shift=1; next_state=s0; end
+			default: next_state=s0;
+		endcase
+	end
+	
+	assign ready (state==s0) && ~reset;
+endmodule	
+
+빠른 곱셈기 
+module Datapath (product, m0, word1, word2, load, shift, add_shift, reset, clock);
+	output [7:0] product; 
+	output m0;
+	input [3:0] word1, word2;
+	input load, shift, add_shift, clock, reset;
+	reg [7:0] product;
+	reg [3:0] multiplier, multiplicand;
+	wire [4:0] sum;
+	
+	assign m0 = product[0];
+	assign sum = product[7:4] + multiplicand;
+	always @ (posedge clock or posedge reset) begin
+		if(reset) begin multiplicand <=0; product <=0; end
+		else if (load) begin 
+			multiplicand <= word1;
+			product <= {4'b0, word2};
+		end else if (shift) begin 
+			product <= product >>1; // product <= {1'b0, product[7:1]};
+		end else if (add_shift) begin 
+			product[7:3] <=sum;
+			product[2:0] <=product[3:1] // product <= {sum, product[3:1]};
+		end
+	end
+endmodule
+
+module Controller (load, shift, add_shift, ready, m0, start, reset, clock, state);
+	output load, shift, add_shift, ready;
+	input m0, start, clock, reset;
+	output [2:0] state;
+	reg [2:0] state, next_state;
+	parameter s0=0, s1=4, s3=5, s5=6, s7=7;
+	wire load, shift, add_shift, ready;
+	
+	always @ (posedge clock or posedge reset) begin // state transition
+		if(reset) state <= s0;
+		else state <= next_state;
+	end
+	
+	always @ (state or start or m0) begin // next state logic
+		case (state)
+			s0: if(start) next_state = s1; else next_state=s0;
+			s1: next_state = s3;
+			s3: next_state = s5;
+			s5: next_state = s7;
+			s7: next_state = s0;
+			default: next_state = s0;
+		endcase
+	end
+	//outputs
+	assign add_shift = (state==s1 || state==s3 || state==s5 || state == s7) & m0;
+	assign shift = (state==s1 || state ==s3 || state==s5 || state == s7) & ~m0;
+	assign load = (State==s0) && start;
+	assign ready = (state==s0) && ~reset;
+endmodule	
