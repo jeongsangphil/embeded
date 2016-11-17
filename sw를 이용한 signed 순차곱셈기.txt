@@ -1,0 +1,67 @@
+module signed_mul (product, ready, End, count, word1, word2, start, clock, reset);
+	parameter N=4;
+	output [2*N-1:0] product;
+	output ready, End, count;
+	input [N-1:0] word1, word2;
+	input start, clock, reset;
+	wire m0, load, shift, add_shift, sub, enable, End;
+	wire [3:0] count;
+	
+	Datapath u1 (product, m0, word1, word2, load, shift, add_shift, sub, ~reset, clock);
+	Controller u2 (load, shift, add_shift, sub, enable, ready, m0, start, End, ~reset, clock);
+	counter u3 (count, enable, ~reset, clock);
+	assign End = (count == N-1);
+endmodule
+module Datapath (product, m0, word1, word2, load, shift, add_shift, sub, reset, clock);
+	output [7:0] product;
+	output m0;
+	input [3:0] word1, word2;
+	input load, shift, add_shift, sub, clock, reset;
+	reg [8:0] eproduct; // 9-bit
+	reg [4:0] multiplicand; // 5-bit
+	wire [4:0] sum; // 5-bit
+
+	assign product = eproduct [7:0];
+	assign m0 = eproduct[0];
+	always @ (posedge clock or posedge reset) begin	
+		if (reset) begin multiplicand <= 0; eproduct <= 0; end
+		else if (load) begin multiplicand <= {word1[3], word1}; eproduct <= {5'b0, word2}; end
+		else if (shift) eproduct <= {eproduct[8], eproduct[8:1]}; // shift right 
+		else if (add_shift) eproduct <= {sum[4], sum[4:0], eproduct[3:1]};	
+	end
+	assign sum = eproduct[8:4] + (sub ? ~multiplicand : multiplicand) + sub;
+endmodule	
+module counter(count, enable, reset, clock);
+	output [3:0] count;
+	input enable, reset, clock;
+	reg [3:0] count;
+	
+	always @ (posedge clock) begin 
+		if (reset) count <=0;
+		else if (enable) count<=count+1;
+		else count <=0; 
+	end
+endmodule
+
+module Controller(load, shift, add_shift, sub, enable, ready, m0, start, End, reset, clock);
+	output load, shift, add_shift, sub, enable, ready;
+	input m0, start, End, reset, clock;
+	reg state, next_state;
+	parameter s0 = 0, s1 = 1;
+	
+	always @ (posedge clock or posedge reset) // state transitions
+		if(reset) state <= s0; else state <= next_state;
+	
+	always @ (state or start or m0) // next state logic
+		case (state)
+			s0: if (start) next_state = s1; else next_state = s0;
+			s1: if (End) next_state = s0; else next_state = s1;
+		endcase
+	// control output logic
+	assign add_shift = (state == s1) && m0;
+	assign sub = (state == s1) & End && m0;
+	assign shift = (state == s1) && ~m0;
+	assign load = (state == s0) && start;
+	assign enable = (state == s1);
+	assign ready = (state == s0) && ~reset;
+endmodule
